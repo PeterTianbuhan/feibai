@@ -7,7 +7,7 @@
 //
 // 这里是纯计算，种子定了结果就定了。命令行在 tools/bot.ts。
 
-import { findWindow } from '../../src/core/aim';
+import { findWindows } from '../../src/core/aim';
 import { DT } from '../../src/core/feel';
 import { makeRng } from '../../src/core/rng';
 import { clone, start, step, type Run } from '../../src/core/sim';
@@ -23,9 +23,14 @@ export interface BotOpts {
   seed: number;
   /** 同一跳最多重来几次，再不过这一趟就不往下走了 */
   retries: number;
+  /**
+   * 有耐心的人：不急着走第一个窗，在等得起的那几圈里挑宽的走（第一个够得上最宽那个八成的窗）。
+   * 圈会长大、时隐时现的世界里，人是会等一等的；默认不开，别的世界的数字不变。
+   */
+  patient: boolean;
 }
 
-export const BOT_DEFAULTS: BotOpts = { runs: 400, sigmaMs: 40, prepMs: 350, seed: 1, retries: 30 };
+export const BOT_DEFAULTS: BotOpts = { runs: 400, sigmaMs: 40, prepMs: 350, seed: 1, retries: 30, patient: false };
 
 export interface HopStat {
   from: number;
@@ -104,7 +109,11 @@ export function playRoute(run: Run, route: Route, given: Partial<BotOpts> = {}):
       // 人只能瞄看得见的点
       if (run.rules.canSee && !run.rules.canSee(s, run.sheet.spots[h.to], run.env)) { h.blind++; spotless = false; break; }
       // 起点上人是不急的，落下之后才需要缓一下
-      const win = findWindow(run, s, h.to, { skip: i === 0 ? 0 : skip });
+      const from = i === 0 ? 0 : skip;
+      // 有耐心的往后多看几圈（等到脚下撑不住为止，findWindows 自己会停），挑宽的
+      const wins = findWindows(run, s, h.to, o.patient ? { skip: from, max: 5, horizon: Math.ceil((run.feel.period * 5.5) / DT) + from } : { skip: from });
+      const widest = Math.max(0, ...wins.map((w) => w.to - w.from + 1));
+      const win = wins.find((w) => w.to - w.from + 1 >= widest * 0.8);
       if (!win) { h.noWindow++; if (starves(run, s)) h.starved++; spotless = false; break; }
       const mid = (win.from + win.to) / 2;
       planned[i]++; sumWin[i] += win.to - win.from + 1; sumWait[i] += mid;

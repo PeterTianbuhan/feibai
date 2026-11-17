@@ -20,6 +20,7 @@ const HELP = `试玩机器人：按「离手时机带误差的人」把每条路
   --sigma <毫秒>   离手时机误差的标准差（默认 ${BOT_DEFAULTS.sigmaMs}）
   --prep <毫秒>    落下之后至少缓多久才离手（默认 ${BOT_DEFAULTS.prepMs}）
   --seed <n>       随机种子（默认 ${BOT_DEFAULTS.seed}）
+  --patient        有耐心的人：不急着走第一个窗，等得起的时候挑宽的走（圈会长大、时隐时现的世界用）
   --hops           把每一跳的数字也列出来
   --json           输出 JSON
 
@@ -43,6 +44,7 @@ export async function main(argv: string[]): Promise<number> {
   const opts = {
     runs: +(arg('runs') ?? BOT_DEFAULTS.runs), sigmaMs: +(arg('sigma') ?? BOT_DEFAULTS.sigmaMs),
     prepMs: +(arg('prep') ?? BOT_DEFAULTS.prepMs), seed: +(arg('seed') ?? BOT_DEFAULTS.seed),
+    patient: argv.includes('--patient'),
   };
   const worlds = WORLDS.filter((w) => !arg('world') || w.id === arg('world'));
   if (!worlds.length) { console.error(`没有叫 ${arg('world')} 的世界。有：${WORLDS.map((w) => w.id).join('、')}`); return 2; }
@@ -66,7 +68,7 @@ export async function main(argv: string[]): Promise<number> {
 
   if (argv.includes('--json')) { console.log(JSON.stringify(out)); return broken ? 1 : 0; }
 
-  console.log(`每条路 ${opts.runs} 趟，离手误差 ±${opts.sigmaMs} 毫秒，落下后缓 ${opts.prepMs} 毫秒\n`);
+  console.log(`每条路 ${opts.runs} 趟，离手误差 ±${opts.sigmaMs} 毫秒，落下后缓 ${opts.prepMs} 毫秒${opts.patient ? '，有耐心（挑宽的窗走）' : ''}\n`);
   for (const { world, level, stats } of out) {
     const w = ATLAS.worlds[world];
     console.log(`${w.name}（${world}）· ${level}档 · 资源「${w.resource.name}」${w.mechanic ? ` · 环境：${w.mechanic.name}` : ''}`);

@@ -135,7 +135,8 @@ export function checkSheet(sheet: Sheet): string[] {
   for (const g of sheet.sights) {
     if (ids.has(g.id)) bad.push(`景 ${g.id} 重名`);
     ids.add(g.id);
-    if (!sheet.spots.some((p) => Math.hypot(p.x - g.x, p.y - g.y) <= g.reach)) bad.push(`景 ${g.id} 附近没有点，永远到不了`);
+    // reach 写 0 的景由世界自己用 env.sight 触发（world.ts 里 Sight.reach 的说明），不用挨着点
+    if (g.reach > 0 && !sheet.spots.some((p) => Math.hypot(p.x - g.x, p.y - g.y) <= g.reach)) bad.push(`景 ${g.id} 附近没有点，永远到不了`);
   }
   if (new Set(sheet.routes.map((r) => r.id)).size !== sheet.routes.length) bad.push('路的 id 有重复');
   return bad;

@@ -54,7 +54,8 @@ export function makeRun(rules: WorldRules, feel: Feel, sheet: Sheet = rules.layo
   }
   const sightsAt: number[][] = sheet.spots.map(() => []);
   sheet.sights.forEach((g, i) => {
-    for (const p of sheet.spots) if (Math.hypot(p.x - g.x, p.y - g.y) <= g.reach) sightsAt[p.id].push(i);
+    // reach 是 0 的景只由世界自己触发，哪怕它正好摆在一个点上
+    if (g.reach > 0) for (const p of sheet.spots) if (Math.hypot(p.x - g.x, p.y - g.y) <= g.reach) sightsAt[p.id].push(i);
   });
   // 找「笔尖在哪个圈里」用的格子
   const cell = maxR * 2, grid = new Map<number, number[]>();

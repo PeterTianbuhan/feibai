@@ -42,7 +42,7 @@ async function launch(): Promise<Browser> {
 }
 
 /**
- * 不走截图模式，真的开着循环按几下键：标题上离手、等它飞、再按、打开地图再关。
+ * 不走截图模式，真的开着循环按几下键：标题上离手、等它飞、再按、静音、打开地图点一下、换档、改窗口大小。
  * 只查一件事：页面不报错。截图模式绕开了输入和循环，这一步补上。
  */
 async function live(browser: Browser, base: string, world: string): Promise<number> {
@@ -54,6 +54,7 @@ async function live(browser: Browser, base: string, world: string): Promise<numb
   await page.goto(`${base}?world=${world}`);
   await page.waitForTimeout(400);
   for (let i = 0; i < 6; i++) { await page.keyboard.press('Space'); await page.waitForTimeout(450); }
+  await page.keyboard.press('KeyM'); await page.keyboard.press('KeyM'); // 静音再开
   await page.waitForTimeout(3500); // 等这一趟结束
   await page.keyboard.press('KeyG'); await page.waitForTimeout(300);
   await page.mouse.click(400, 300); await page.waitForTimeout(300);

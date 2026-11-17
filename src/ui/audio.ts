@@ -1,11 +1,16 @@
-// 声音。外壳管开关和总线，世界自己决定什么时候出什么声。
-// 这里有几样现成的音色（拨弦、一声风、一记闷响），世界也可以拿 ctx 和 out 自己接振荡器。
+// 声音。外壳管开关和总线，世界自己决定什么时候出什么声。全是用代码合成的，不放音频文件。
+// 这里有几样现成的音色（拨弦、一声风、一记闷响），世界也可以拿 ctx 和 out 自己接振荡器，
+// 包括一直响着的底子（没人按键时这一页听起来的样子）。自己接的东西都接到 out 上：
+// 静音、切到后台都是在 out 这里管的。一直响着的东西，要在 Painter.leave 里停掉。
+// 浏览器要等用户按过一下才让出声，所以 ctx 一开始是 null，用 live 判断现在能不能出声。
+
+const VOLUME = 0.6;
 
 export class AudioKit {
   ctx: AudioContext | null = null;
   /** 世界的声音都接到这里，后面带一点回声 */
   out: GainNode | null = null;
-  muted = false;
+  private quiet = false;
   private noise: AudioBuffer | null = null;
 
   /** 要在用户按了一下之后调，浏览器才让出声 */
@@ -14,7 +19,7 @@ export class AudioKit {
     try {
       const AC: typeof AudioContext = window.AudioContext || (window as any).webkitAudioContext;
       const ac = new AC(), out = ac.createGain();
-      out.gain.value = 0.6; out.connect(ac.destination);
+      out.gain.value = this.quiet ? 0 : VOLUME; out.connect(ac.destination);
       const dl = ac.createDelay(1), fb = ac.createGain(), lp = ac.createBiquadFilter();
       dl.delayTime.value = 0.29; fb.gain.value = 0.32; lp.type = 'lowpass'; lp.frequency.value = 1400;
       out.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(ac.destination);
@@ -27,8 +32,25 @@ export class AudioKit {
     }
   }
 
+  /** 现在能出声：用户按过了，而且没静音 */
   get live() {
-    return !!this.ctx && !this.muted;
+    return !!this.ctx && !this.quiet;
+  }
+
+  get muted() {
+    return this.quiet;
+  }
+
+  /** 静音压的是总线，世界自己接的、一直响着的东西也一起静下来 */
+  set muted(on: boolean) {
+    this.quiet = on;
+    if (this.ctx && this.out) this.out.gain.setTargetAtTime(on ? 0 : VOLUME, this.ctx.currentTime, 0.03);
+  }
+
+  /** 页面切到后台就停，回来再接着响 */
+  pause(on: boolean) {
+    if (!this.ctx) return;
+    if (on) void this.ctx.suspend(); else void this.ctx.resume();
   }
 
   /** 拨一下弦 */

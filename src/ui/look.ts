@@ -69,6 +69,8 @@ export interface Painter {
   update(dt: number, scene: Scene): void;
   /** 画整个画面 */
   draw(ctx: CanvasRenderingContext2D, scene: Scene): void;
+  /** 要离开这个世界了：把自己接的、还在响的声音停掉 */
+  leave?(): void;
   /** 只画底，地图垫在下面用 */
   ground(ctx: CanvasRenderingContext2D, view: View): void;
 }

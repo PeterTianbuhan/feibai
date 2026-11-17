@@ -83,6 +83,7 @@ export class App {
 
   /** 换到一个世界，从它的某个大点起 */
   enter(world: string, spot?: number) {
+    this.painter?.leave?.();
     this.world = world;
     this.look = LOOKS[world];
     applyTheme(this.look.theme);
@@ -172,6 +173,7 @@ export class App {
       if (id && id !== this.world) { this.enter(id); this.fillMapText(); }
     });
     addEventListener('contextmenu', (e) => e.preventDefault());
+    document.addEventListener('visibilitychange', () => this.audio.pause(document.hidden));
   }
 
   private measure() {

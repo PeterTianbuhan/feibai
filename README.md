@@ -18,5 +18,6 @@ npm run check    # 类型检查 + 测试 + 构建，提交前要过
 - `src/worlds/<名字>/` 一个世界一个目录
 - `src/ui/` 标题、地图、见闻册、结束画面
 - `tools/` 试玩机器人、截图
+- `studies/<名字>/` 某个世界的画法试样，独立页面，不进游戏
 - `prototype/index.html` 最早的单文件版，双击能玩，只作参考
 - `docs/design.md` Peter 定下的设计

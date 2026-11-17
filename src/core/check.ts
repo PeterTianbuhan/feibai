@@ -33,7 +33,7 @@ export function checkWorld(rules: WorldRules): string[] {
     const run = makeRun(rules, feel, sheet);
     // 世界自己的状态要能浅拷贝：改了副本，原件不能跟着变
     const a = start(run), before = JSON.stringify(a.w);
-    const b = clone(a);
+    const b = clone(run, a);
     for (let i = 0; i < 400; i++) step(run, b, i === 60);
     if (JSON.stringify(a.w) !== before) bad.push('世界的状态 w 里有嵌套的对象，clone 之后还连着。只放一层');
     // 同样的按键走两遍要一模一样

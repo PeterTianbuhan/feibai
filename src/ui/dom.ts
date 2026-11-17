@@ -12,7 +12,8 @@ const HTML = `
 </div>
 <div id="hud" class="layer hidden">
   <div class="score" id="score"></div>
-  <div class="bar"><i id="resbar"></i></div>
+  <div class="bar" id="bar"><i id="resbar"></i></div>
+  <button id="quit" class="plain" hidden>地图</button>
 </div>
 <div id="end" class="layer hidden">
   <div class="box">

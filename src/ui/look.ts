@@ -61,7 +61,7 @@ export interface Painter {
   resize(view: View): void;
   /** 新的一趟开始 */
   begin(scene: Scene): void;
-  /** 规则里发生了一件事：离手、落下、结束 */
+  /** 规则里发生了一件事：离手、落下、结束，还有世界自己触发的（put 时笔被挪走了，笔迹要断开） */
   on(ev: SimEvent, scene: Scene): void;
   /** 进度里记下了新东西：第一次到的大点、第一次见的景。不写的话外壳用一行小字提示 */
   news?(news: News, scene: Scene): void;
@@ -81,6 +81,10 @@ export interface WorldLook {
   count(n: number): string;
   /** 结束时的那一行。accent 那一小段用点睛的颜色 */
   endLine(info: { score: number; fine: number; level: string; best: number; record: boolean }): { text: string; accent?: string };
+  /** 资源自己画（画在笔尖上、看涟漪自己），不要外壳左下角那根条。默认 false */
+  ownGauge?: boolean;
+  /** 一趟里一直摆着一个「地图」的小字，点了就收笔去地图。飞空了不结束、会被送回大点的世界要开。默认 false */
+  midExit?: boolean;
   /** 存画时的文件名（不带扩展名） */
   fileName(score: number): string;
   /** seed 给画面上的随机用（纸的纤维、溅的墨点），同一个种子画出来一样 */

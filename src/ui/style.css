@@ -30,6 +30,8 @@ button[hidden] { display:none; }
 #hud .bar { position:absolute; left:calc(5vw + .55em); bottom:6vh; width:2px; height:18vh; background:color-mix(in srgb, var(--line) 10%, transparent); font-size:clamp(20px,3.4vmin,32px); }
 #hud .bar i { position:absolute; left:0; bottom:0; width:100%; height:100%; background:var(--line); transform-origin:bottom; }
 
+#hud #quit { position:absolute; right:4vw; top:5vh; font-size:clamp(12px,1.8vmin,16px); opacity:.4; }
+
 #end .box { position:absolute; left:6vw; bottom:7vh; font-size:clamp(13px,1.9vmin,17px); letter-spacing:.35em; line-height:2.3; opacity:.66; }
 #end .box b { font-weight:400; color:var(--accent); }
 #end button { margin:0 1em 0 0; }

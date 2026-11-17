@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { findWindow, flyOut, hopWindowMs } from '../src/core/aim';
+import { findWindow, findWindows, flyOut, hopWindowMs, trace } from '../src/core/aim';
 import { across, checkLinks, makeAtlas } from '../src/core/atlas';
 import { checkWorld } from '../src/core/check';
 import { DT, LEVELS, TICKS } from '../src/core/feel';
@@ -12,6 +12,7 @@ import { clone, makeRun, start, step, type Run } from '../src/core/sim';
 import type { Landing, Sim } from '../src/core/world';
 import { rules as ink } from '../src/worlds/ink/rules';
 import { playRoute } from '../tools/bot/play';
+import { BELL, GHOST, SIGHT, WALL_Y, ghostOn, odd } from './fake/odd';
 import { fake, WIND } from './fake/rules';
 
 const MID = LEVELS[1];
@@ -55,7 +56,7 @@ describe('规则和运动', () => {
     const run = makeRun(ink, MID), route = run.sheet.routes.find((r) => r.id === 'hill')!;
     const speeds: number[] = [];
     // 一路上有时擦着圈边落，有时落在正中
-    const s = start(run, route.spots[0], route.spots[1]);
+    const s = start(run, route.spots[0], { toward: route.spots[1] });
     for (let i = 1; i <= 8; i++) {
       const hit = hopTo(run, s, route.spots[i], i % 2 ? 0.08 : 0.5)!;
       expect(hit.spot).toBe(route.spots[i]);
@@ -69,7 +70,7 @@ describe('规则和运动', () => {
   it('落得准不改绕圈半径：最后都收到这个点固定的半径上', () => {
     const run = makeRun(ink, MID), [a, b] = run.sheet.routes[0].spots;
     const radii = [0.05, 0.5, 0.95].map((pick) => {
-      const s = start(run, a, b);
+      const s = start(run, a, { toward: b });
       hopTo(run, s, b, pick);
       for (let i = 0; i < TICKS * 3; i++) step(run, s, false);
       return s.r;
@@ -82,7 +83,7 @@ describe('规则和运动', () => {
   it('「妙」只奖不罚：水墨里落得准，接下来一小会儿不耗墨', () => {
     const run = makeRun(ink, MID), [a, b] = run.sheet.routes[0].spots;
     const after = (pick: number) => {
-      const s = start(run, a, b), hit = hopTo(run, s, b, pick)!;
+      const s = start(run, a, { toward: b }), hit = hopTo(run, s, b, pick)!;
       for (let i = 0; i < TICKS; i++) step(run, s, false);
       return { fine: hit.fine, res: s.res };
     };
@@ -98,7 +99,7 @@ describe('规则和运动', () => {
     const s = start(run);
     // 找一个哪儿都落不到的离手时刻
     let k = 0;
-    for (; k < TICKS * 4; k++) { if (flyOut(run, clone(s)) < 0) break; step(run, s, false); }
+    for (; k < TICKS * 4; k++) { if (flyOut(run, clone(run, s)) < 0) break; step(run, s, false); }
     hop(run, s, 0);
     expect(s.over).toBe('miss');
 
@@ -111,7 +112,7 @@ describe('规则和运动', () => {
   });
 
   it('副本和原件互不相干', () => {
-    const run = makeRun(ink, MID), s = start(run), c = clone(s);
+    const run = makeRun(ink, MID), s = start(run), c = clone(run, s);
     for (let i = 0; i < 500; i++) step(run, c, i === 100);
     expect(s.tick).toBe(0);
     expect(s.seen.reduce((a, b) => a + b, 0)).toBe(1);
@@ -120,8 +121,8 @@ describe('规则和运动', () => {
 
   it('时间窗说得准：窗里离手落得进，窗外一拍就落不进', () => {
     const run = makeRun(ink, LEVELS[2]), [a, b] = run.sheet.routes[0].spots;
-    const s = start(run, a, b), w = findWindow(run, s, b)!;
-    const lands = (k: number) => { const c = clone(s); return hop(run, c, k)?.spot === b; };
+    const s = start(run, a, { toward: b }), w = findWindow(run, s, b)!;
+    const lands = (k: number) => { const c = clone(run, s); return hop(run, c, k)?.spot === b; };
     expect(lands(w.from)).toBe(true);
     expect(lands(w.to)).toBe(true);
     expect(lands(w.from - 1)).toBe(false);
@@ -148,9 +149,9 @@ describe('假世界：接口不是只为水墨做的', () => {
   });
 
   it('风真的把笔尖吹偏了，瞄准也把风算进去了', () => {
-    const run = makeRun(fake, MID), s = start(run, 0, 1);
+    const run = makeRun(fake, MID), s = start(run, 0, { toward: 1 });
     const w = findWindow(run, s, 1)!;
-    const c = clone(s);
+    const c = clone(run, s);
     for (let i = 0; i < Math.round((w.from + w.to) / 2); i++) step(run, c, false);
     step(run, c, true);
     const vx0 = c.vx, flight = c.tick;
@@ -158,7 +159,7 @@ describe('假世界：接口不是只为水墨做的', () => {
     expect(c.at).toBe(1);
     expect(c.vx - vx0).toBeCloseTo(WIND * (c.tick - flight) * DT, 6);
     // 同一个时刻离手，没有风的话落不到同一个地方
-    const calm = makeRun({ ...fake, fly: undefined }, MID), d = clone(s);
+    const calm = makeRun({ ...fake, fly: undefined }, MID), d = clone(calm, s);
     for (let i = 0; i < Math.round((w.from + w.to) / 2); i++) step(calm, d, false);
     step(calm, d, true);
     while (d.at < 0 && !d.over) step(calm, d, false);
@@ -166,7 +167,7 @@ describe('假世界：接口不是只为水墨做的', () => {
   });
 
   it('资源按它自己的规矩耗和补：绕着不耗，飞着耗，落到泉上补满', () => {
-    const run = makeRun(fake, MID), s = start(run, 0, 1);
+    const run = makeRun(fake, MID), s = start(run, 0, { toward: 1 });
     hopTo(run, s, 1);
     const afterFlight = s.res;
     expect(afterFlight).toBeLessThan(1);
@@ -185,6 +186,132 @@ describe('假世界：接口不是只为水墨做的', () => {
     expect(a.hops.map((h) => h.ok)).toEqual(b.hops.map((h) => h.ok));
     // 手更稳的人过得更多
     expect(playRoute(run, route, { runs: 60, sigmaMs: 10 }).pass).toBeGreaterThanOrEqual(a.pass);
+  });
+});
+
+describe('怪世界：底座给世界的每一种能力', () => {
+  const run = makeRun(odd, MID);
+  /** 找一个离手之后哪儿都落不到的时刻 */
+  const missFrom = (s: Sim) => {
+    for (let k = 0; k < TICKS * 4; k++) { if (flyOut(run, clone(run, s)) !== 1 && flyOut(run, clone(run, s)) !== BELL) break; step(run, s, false); }
+  };
+
+  it('合格', () => {
+    expect(checkWorld(odd)).toEqual([]);
+    expect(run.reach).toBe(700);
+    expect(run.env.ringAt(270, 10)).toBe(1);
+    expect(run.env.ringAt(270, 10, 1)).toBe(-1);
+    expect(run.env.ringAt(400, 300)).toBe(-1);
+  });
+
+  it('离手扣资源；用尽了不马上结束，由世界决定什么时候结束', () => {
+    const s = start(run, 0, { toward: 1 });
+    hopTo(run, s, 1);
+    expect(s.res).toBe(0.75);
+    s.res = 0.25;
+    hopTo(run, s, 2); // 这一下扣到 0，飞着的时候不结束，落到大点上补满
+    expect(s.over).toBe('');
+    expect(s.res).toBe(1);
+
+    const t = start(run, 0, { toward: 1 });
+    hopTo(run, t, 1);
+    t.res = 0;
+    step(run, t, false); // 没格了还停在小点上
+    expect(t.over).toBe('out');
+  });
+
+  it('飞空了世界可以接手：送回上一个大点，这一趟接着走，笔迹要断开', () => {
+    const s = start(run, 0, { toward: 1 });
+    hopTo(run, s, 1); hopTo(run, s, 2);
+    expect(s.lastBig).toBe(2);
+    // 往没有点的方向离手
+    while (flyOut(run, clone(run, s)) !== 2 || s.tick % 7) step(run, s, false);
+    s.events.length = 0;
+    step(run, s, true);
+    while (s.at < 0 && !s.over) step(run, s, false);
+    expect(s.over).toBe('');
+    expect(s.at).toBe(2);
+    expect(s.events.some((e) => e.type === 'put' && e.spot === 2)).toBe(true);
+    expect(s.events.some((e) => e.type === 'over')).toBe(false);
+    expect(s.res).toBe(1);
+    expect(Math.hypot(s.x - 540, s.y)).toBeCloseTo(run.orbitR[2], 6);
+  });
+
+  it('路过就把别的点记成到过，留一个长久的记号，进度里都记下', () => {
+    const s = start(run, 0, { toward: 1 }), atlas = makeAtlas([odd]), save = emptySave();
+    hopTo(run, s, 1);
+    expect(s.seen[BELL]).toBe(1);
+    expect(s.score).toBe(2); // 落了一个，路过一个
+    const news = s.events.map((e) => record(save, atlas, 'odd', e));
+    const wp = progressOf(save, atlas.sheets.odd);
+    expect(wp.spots).toContain(BELL);
+    expect(wp.marks).toEqual(['bell']);
+    expect(news.some((n) => n.mark === 'bell')).toBe(true);
+    expect(wp.hops.length).toBe(1); // 路过不算一跳
+    expect(parseSave(JSON.stringify(save)).worlds.odd.marks).toEqual(['bell']);
+  });
+
+  it('「妙」算不算由世界说了算', () => {
+    const s = start(run, 0, { toward: 1 }), hit = hopTo(run, s, 1)!;
+    expect(hit.d).toBeLessThan(30);
+    expect(hit.fine).toBe(false); // 这个点是 flat 的，落得再准也不算
+    expect(hopTo(run, s, 2)!.fine).toBe(true);
+  });
+
+  it('状态里有数组也拷得开', () => {
+    const s = start(run, 0, { toward: 1 });
+    hopTo(run, s, 1);
+    const c = clone(run, s);
+    hopTo(run, c, 2);
+    expect(s.w.path).toEqual([1]);
+    expect(c.w.path).toEqual([1, 2]);
+  });
+
+  it('时隐时现的圈：在的时候才接；一跳有几次机会数得出来', () => {
+    const s = start(run, 0, { toward: 1 });
+    hopTo(run, s, 1); hopTo(run, s, 2);
+    const far = { max: 99, horizon: TICKS * MID.period * 9 };
+    const wins = findWindows(run, s, GHOST, far);
+    expect(wins.length).toBeGreaterThanOrEqual(2);
+    // 窗里离手，落下那一拍它正好在
+    for (const w of wins) {
+      const c = clone(run, s), hit = hop(run, c, w.from)!;
+      expect(hit.spot).toBe(GHOST);
+      expect(ghostOn(c.tick, MID.period)).toBe(true);
+    }
+    // 它一直在的话，能落的时间更多
+    const solid = makeRun({ ...odd, canLand: undefined }, MID);
+    const width = (ws: { from: number; to: number }[]) => ws.reduce((a, w) => a + w.to - w.from + 1, 0);
+    expect(width(findWindows(solid, s, GHOST, far))).toBeGreaterThan(width(wins) * 1.3);
+  });
+
+  it('撞墙弹回：去向的虚线是按规则走出来的，画出来会折', () => {
+    const s = start(run, 0);
+    // 转到笔尖朝下（y 变大的方向）
+    while (!(Math.cos(s.ang) * s.dir > 0.99)) step(run, s, false);
+    const pts = trace(run, s, 600, 2), ys = pts.filter((_, i) => i % 2 === 1);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(WALL_Y);
+    const peak = ys.indexOf(Math.max(...ys));
+    expect(peak).toBeGreaterThan(0);
+    expect(ys[ys.length - 1]).toBeLessThan(ys[peak] - 100); // 先往下，撞了墙往回
+    missFrom(s);
+  });
+
+  it('机器人只瞄看得见的点', () => {
+    const s = start(run, 0);
+    expect(odd.canSee!(s, run.sheet.spots[1], run.env)).toBe(true);
+    expect(odd.canSee!(s, run.sheet.spots[GHOST], run.env)).toBe(false);
+    expect(Math.hypot(run.sheet.spots[GHOST].x - s.x, run.sheet.spots[GHOST].y - s.y)).toBeGreaterThan(SIGHT);
+    const stat = playRoute(run, { id: 'far', name: '看不见的', spots: [0, GHOST] }, { runs: 5 });
+    expect(stat.hops[0].blind).toBe(5);
+    expect(stat.broken).toBe(true);
+    expect(playRoute(run, run.sheet.routes[0], { runs: 30 }).broken).toBe(false);
+  });
+
+  it('存档里到过的点，规则看得到', () => {
+    const s = start(run, 0, { known: [0, 2, 99] });
+    expect([...s.known]).toEqual([1, 0, 1, 0, 0]);
+    expect(clone(run, s).known).toBe(s.known);
   });
 });
 

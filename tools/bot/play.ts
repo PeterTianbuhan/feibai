@@ -38,6 +38,8 @@ export interface HopStat {
   out: number;
   /** 找不到时间窗的次数：这一跳够不着，或者等不到窗口资源就完了 */
   noWindow: number;
+  /** 落下之后看不见下一个点的次数（视野受限的世界）。看不见就没法瞄 */
+  blind: number;
   /** 时间窗平均多宽、平均等了多久才离手，毫秒 */
   windowMs: number;
   waitMs: number;
@@ -59,7 +61,7 @@ export interface RouteStat {
 type Outcome = 'ok' | 'strayed' | 'missed' | 'out';
 
 function attempt(run: Run, from: Sim, wait: number, target: number): { s: Sim; outcome: Outcome } {
-  const s = clone(from);
+  const s = clone(run, from);
   for (let i = 0; i < wait; i++) {
     step(run, s, false);
     if (s.over) return { s, outcome: 'out' };
@@ -75,14 +77,16 @@ export function playRoute(run: Run, route: Route, given: Partial<BotOpts> = {}):
   const sigma = o.sigmaMs / 1000 / DT, skip = Math.round(o.prepMs / 1000 / DT);
   const hops: HopStat[] = [], sumWin: number[] = [], sumWait: number[] = [], planned: number[] = [];
   for (let i = 1; i < route.spots.length; i++) {
-    hops.push({ from: route.spots[i - 1], to: route.spots[i], tries: 0, ok: 0, strayed: 0, missed: 0, out: 0, noWindow: 0, windowMs: 0, waitMs: 0, pass: 0 });
+    hops.push({ from: route.spots[i - 1], to: route.spots[i], tries: 0, ok: 0, strayed: 0, missed: 0, out: 0, noWindow: 0, blind: 0, windowMs: 0, waitMs: 0, pass: 0 });
     sumWin.push(0); sumWait.push(0); planned.push(0);
   }
   let clean = 0;
   for (let r = 0; r < o.runs; r++) {
-    let s = start(run, route.spots[0], route.spots[1]), spotless = true;
+    let s = start(run, route.spots[0], { toward: route.spots[1] }), spotless = true;
     for (let i = 0; i < hops.length; i++) {
       const h = hops[i];
+      // 人只能瞄看得见的点
+      if (run.rules.canSee && !run.rules.canSee(s, run.sheet.spots[h.to], run.env)) { h.blind++; spotless = false; break; }
       // 起点上人是不急的，落下之后才需要缓一下
       const win = findWindow(run, s, h.to, { skip: i === 0 ? 0 : skip });
       if (!win) { h.noWindow++; spotless = false; break; }

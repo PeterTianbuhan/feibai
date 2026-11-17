@@ -40,7 +40,10 @@ export const ORBIT_SETTLE = 5;
 /** 落点离圈心最近也按「点心半径 + 这个数」起绕，免得贴在点上 */
 export const ORBIT_MIN_GAP = 6;
 
-/** 离手后飞出这么远还没被接住，算飞空 */
+/** 一程：大约是普通一跳的距离。世界设计里的距离都按「几程」来说（docs/worlds.md） */
+export const LEG = 250;
+
+/** 离手后飞出这么远还没被接住，算飞空。世界可以用 rules.reach 定自己的 */
 export const REACH = 540;
 
 /** 「妙」：落点到圈心的距离，在点心到圈边之间不超过这个比例 */

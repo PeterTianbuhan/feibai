@@ -96,7 +96,7 @@ export class App {
   reset() {
     const rules = ATLAS.worlds[this.world], sheet = ATLAS.sheets[this.world];
     this.run = makeRun(rules, LEVELS[this.level], sheet);
-    this.sim = start(this.run, this.startSpot);
+    this.sim = start(this.run, this.startSpot, { known: progressOf(this.save, sheet).spots });
     this.acc = 0; this.pressed = false; this.endShown = false; this.gaze.until = -1;
     this.scene = {
       view: this.view, cam: { x: 0, y: 0, z: this.view.z0 }, time: 0, mode: 'title', dieT: 0, endT: 0,
@@ -110,6 +110,8 @@ export class App {
 
     show('end', false); show('title', !this.mapOpen); show('hud', !this.firstRun && !this.mapOpen);
     $('motto').textContent = this.look.motto;
+    $('bar').style.display = this.look.ownGauge ? 'none' : '';
+    ($('quit') as HTMLButtonElement).hidden = true;
     $('score').textContent = '';
     for (const b of $('levels').querySelectorAll<HTMLElement>('[data-lv]')) b.classList.toggle('on', +b.dataset.lv! === this.level);
     // 只有一个起点的时候，标题页不摆地图
@@ -151,7 +153,7 @@ export class App {
       if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); if (this.mapOpen) this.closeMap(); else this.act(); }
       else if (e.code === 'KeyM') this.audio.muted = !this.audio.muted;
       else if (e.code === 'KeyS' && this.mode === 'end') this.savePicture();
-      else if (e.code === 'KeyG') { if (this.mapOpen) this.closeMap(); else this.openMap(); }
+      else if (e.code === 'KeyG') { if (this.mapOpen) this.closeMap(); else if (this.mode === 'play') this.quit(); else this.openMap(); }
       else if (e.code === 'Escape' && this.mapOpen) this.closeMap();
       else if (/^Digit[1-9]$/.test(e.code) && !this.mapOpen) this.setLevel(+e.code.slice(5) - 1);
     });
@@ -161,6 +163,7 @@ export class App {
     });
     $('open-map').addEventListener('click', () => this.openMap());
     $('end-map').addEventListener('click', () => this.openMap());
+    $('quit').addEventListener('click', () => this.quit());
     $('again').addEventListener('click', () => { this.audio.wake(); if (this.mode === 'end') this.reset(); });
     $('save').addEventListener('click', () => this.savePicture());
     $('map-worlds').addEventListener('click', (e) => {
@@ -194,6 +197,13 @@ export class App {
     if (this.mode === 'end') this.reset();
     show('title', false); show('hud', false); show('map', true);
     this.fillMapText();
+  }
+
+  /** 一趟走到一半收笔，去地图。成绩和进度照记，下一趟从最后落过的大点起 */
+  quit() {
+    if (this.mode !== 'play') return;
+    this.settle();
+    this.openMap();
   }
 
   closeMap() {
@@ -244,6 +254,7 @@ export class App {
         if (press && sc.mode === 'title') {
           sc.mode = 'play'; this.firstRun = false;
           show('title', false); show('hud', true);
+          ($('quit') as HTMLButtonElement).hidden = !this.look.midExit;
         }
         step(this.run, sim, press);
         if (sim.events.length) this.drain();
@@ -277,13 +288,13 @@ export class App {
     let dirty = false;
     for (const ev of sim.events) {
       this.painter.on(ev, sc);
-      if (ev.type === 'land' || ev.type === 'sight') {
+      if (ev.type === 'land' || ev.type === 'visit' || ev.type === 'sight' || ev.type === 'mark') {
         const news = record(this.save, ATLAS, this.world, ev);
-        if (news.spot !== undefined || news.sight !== undefined || news.rewards.length || news.ports.length) {
+        if (news.spot !== undefined || news.sight !== undefined || news.mark !== undefined || news.rewards.length || news.ports.length) {
           dirty = true;
           this.tell(news);
         }
-        if (ev.type === 'land') $('score').textContent = sim.score ? this.look.count(sim.score) : '';
+        $('score').textContent = sim.score ? this.look.count(sim.score) : '';
       } else if (ev.type === 'over') {
         sc.mode = 'dying'; sc.dieT = 0;
       }
@@ -315,14 +326,9 @@ export class App {
 
   /** 一趟结束：镜头拉远看整幅画 */
   private finish() {
-    const sc = this.scene, sim = this.sim, sheet = this.run.sheet;
-    sc.mode = 'end'; sc.endT = 0;
+    const sc = this.scene, sim = this.sim;
     const best = sc.progress.best[this.level] ?? 0;
-    const isRecord = recordBest(this.save, sheet, this.level, sim.score);
-    // 这一趟落过大点的话，下一趟从最后落的那个大点起。飞空了不用从头来
-    if (sim.lastBig >= 0) this.startSpot = sim.lastBig;
-    this.save.at = { world: this.world, spot: this.startSpot };
-    this.persist();
+    const isRecord = this.settle();
     const line = this.look.endLine({ score: sim.score, fine: sim.fine, level: LEVELS[this.level].name, best, record: isRecord });
     const el = $('endline');
     el.textContent = line.text;
@@ -332,6 +338,18 @@ export class App {
       el.append(b);
     }
     show('hud', false);
+  }
+
+  /** 一趟收了：记成绩，定下一趟从哪起，画面转到结束。返回是不是新高 */
+  private settle(): boolean {
+    const sc = this.scene, sim = this.sim;
+    sc.mode = 'end'; sc.endT = 0;
+    const isRecord = recordBest(this.save, this.run.sheet, this.level, sim.score);
+    // 这一趟落过大点的话，下一趟从最后落的那个大点起。飞空了不用从头来
+    if (sim.lastBig >= 0) this.startSpot = sim.lastBig;
+    this.save.at = { world: this.world, spot: this.startSpot };
+    this.persist();
+    return isRecord;
   }
 
   /** 镜头往哪看：笔尖和「接下来能去的地方」之间 */

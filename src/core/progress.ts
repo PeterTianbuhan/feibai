@@ -17,6 +17,8 @@ export interface WorldProgress {
   sights: string[];
   /** 拿到的奖励 */
   rewards: string[];
+  /** 世界要长久记住的事（绣出的图样、剪出的花），世界自己起名字 */
+  marks: string[];
   /** 每一档最多一趟落了几个点 */
   best: number[];
 }
@@ -33,7 +35,7 @@ export interface Save {
 export const emptySave = (): Save => ({ v: 1, level: 1, at: null, worlds: {} });
 
 const freshWorld = (sheet: Sheet): WorldProgress => ({
-  print: fingerprint(sheet), spots: [sheet.start], hops: [], sights: [], rewards: [], best: [],
+  print: fingerprint(sheet), spots: [sheet.start], hops: [], sights: [], rewards: [], marks: [], best: [],
 });
 
 /** 这个世界的进度。没有，或者布局已经变了，就给一份新的 */
@@ -57,7 +59,7 @@ export function parseSave(text: string | null): Save {
     if (raw.at && typeof raw.at.world === 'string' && Number.isInteger(raw.at.spot)) save.at = { world: raw.at.world, spot: raw.at.spot };
     for (const [id, w] of Object.entries<any>(raw.worlds ?? {})) {
       if (!w || typeof w.print !== 'string') continue;
-      save.worlds[id] = { print: w.print, spots: nums(w.spots), hops: nums(w.hops), sights: strs(w.sights), rewards: strs(w.rewards), best: nums(w.best) };
+      save.worlds[id] = { print: w.print, spots: nums(w.spots), hops: nums(w.hops), sights: strs(w.sights), rewards: strs(w.rewards), marks: strs(w.marks), best: nums(w.best) };
     }
   } catch {
     return emptySave();
@@ -91,6 +93,7 @@ export interface News {
   spot?: number;
   big?: number;
   sight?: number;
+  mark?: string;
   rewards: Reward[];
   /** 新通的渡口对岸 */
   ports: { world: string; spot: number }[];
@@ -100,13 +103,13 @@ export interface News {
 export function record(save: Save, atlas: Atlas, world: string, ev: SimEvent): News {
   const sheet = atlas.sheets[world], wp = progressOf(save, sheet);
   const news: News = { rewards: [], ports: [] };
-  if (ev.type === 'land') {
+  if (ev.type === 'land' || ev.type === 'visit') {
     if (!wp.spots.includes(ev.spot)) {
       wp.spots.push(ev.spot);
       news.spot = ev.spot;
       if (sheet.spots[ev.spot].big) news.big = ev.spot;
     }
-    if (ev.from >= 0 && ev.from !== ev.spot) {
+    if (ev.type === 'land' && ev.from >= 0 && ev.from !== ev.spot) {
       const k = hopKey(ev.from, ev.spot);
       if (!wp.hops.includes(k)) wp.hops.push(k);
     }
@@ -120,6 +123,9 @@ export function record(save: Save, atlas: Atlas, world: string, ev: SimEvent): N
     const g = sheet.sights[ev.sight];
     if (g.needs && !wp.rewards.includes(g.needs)) return news;
     if (!wp.sights.includes(g.id)) { wp.sights.push(g.id); news.sight = ev.sight; }
+  } else if (ev.type === 'mark') {
+    if (!wp.marks.includes(ev.id)) { wp.marks.push(ev.id); news.mark = ev.id; }
+    return news;
   } else return news;
 
   const got = exploration(sheet, wp);

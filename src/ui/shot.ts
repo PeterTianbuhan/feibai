@@ -31,9 +31,9 @@ function follow(app: App, route: Route, hops: number) {
         pressAt = sim.tick + Math.round((win.from + win.to) / 2);
       } else {
         // 找一个离手之后哪儿都落不到的时刻
-        const probe = clone(sim);
+        const probe = clone(app.run, sim);
         for (let k = 0; k < TICKS * 6; k++) {
-          if (k > TICKS * 0.5 && flyOut(app.run, clone(probe)) < 0) { pressAt = sim.tick + k; break; }
+          if (k > TICKS * 0.5 && flyOut(app.run, clone(app.run, probe)) < 0) { pressAt = sim.tick + k; break; }
           step(app.run, probe, false);
           if (probe.over) break;
         }

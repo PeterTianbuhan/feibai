@@ -26,7 +26,7 @@ button[hidden] { display:none; }
 .hidden button { pointer-events:none; }
 
 #hud { transition:opacity .5s ease; }
-#hud .score { position:absolute; left:5vw; top:6vh; writing-mode:vertical-rl; font-size:clamp(20px,3.4vmin,32px); letter-spacing:.2em; opacity:.75; }
+#hud .score { position:absolute; left:5vw; top:6vh; writing-mode:vertical-rl; text-orientation:upright; font-size:clamp(20px,3.4vmin,32px); letter-spacing:.2em; opacity:.75; }
 #hud .bar { position:absolute; left:calc(5vw + .55em); bottom:6vh; width:2px; height:18vh; background:color-mix(in srgb, var(--line) 10%, transparent); font-size:clamp(20px,3.4vmin,32px); }
 #hud .bar i { position:absolute; left:0; bottom:0; width:100%; height:100%; background:var(--line); transform-origin:bottom; }
 

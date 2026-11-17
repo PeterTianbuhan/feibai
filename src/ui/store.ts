@@ -18,6 +18,7 @@ export function memoryStore(): Store {
   return { get: (k) => m.get(k) ?? null, set: (k, v) => void m.set(k, v) };
 }
 
-const KEY = 'yibi.save.v1';
+// 游戏叫《飞白》（目录和包名暂时还叫 yibi）
+const KEY = 'feibai.save.v1';
 export const loadSave = (store: Store): Save => parseSave(store.get(KEY));
 export const writeSave = (store: Store, save: Save) => store.set(KEY, JSON.stringify(save));

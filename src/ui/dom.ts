@@ -6,7 +6,7 @@ import type { Theme } from './look';
 
 const HTML = `
 <div id="title" class="layer">
-  <div class="col"><h1>一笔</h1><p id="motto"></p><div class="dot"></div></div>
+  <div class="col"><h1>飞白</h1><p id="motto"></p><div class="dot"></div></div>
   <div id="levels">${LEVELS.map((l, i) => `<button data-lv="${i}">${l.name}</button>`).join('')}<button id="open-map" class="plain" hidden>地图</button></div>
   <div id="hint">点按 · 空格　离手</div>
 </div>

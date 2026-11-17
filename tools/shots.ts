@@ -60,7 +60,7 @@ async function live(browser: Browser, base: string, world: string): Promise<numb
   await page.keyboard.press('Digit1'); await page.waitForTimeout(200);
   await page.setViewportSize({ width: 500, height: 800 }); await page.waitForTimeout(300);
   await page.keyboard.press('Space'); await page.waitForTimeout(600);
-  const saved = await page.evaluate(() => localStorage.getItem('yibi.save.v1'));
+  const saved = await page.evaluate(() => localStorage.getItem('feibai.save.v1'));
   if (!saved) errors.push('进度没有存进浏览器');
   await ctx.close();
   if (errors.length) console.error(`✗ ${world} 真按键试玩报错：\n  ` + [...new Set(errors)].join('\n  '));

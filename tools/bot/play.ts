@@ -38,6 +38,8 @@ export interface HopStat {
   out: number;
   /** 找不到时间窗的次数：这一跳够不着，或者等不到窗口资源就完了 */
   noWindow: number;
+  /** 没有窗的那些次里，有几次是因为资源撑不到（试着离手，飞到一半资源就尽了） */
+  starved: number;
   /** 落下之后看不见下一个点的次数（视野受限的世界）。看不见就没法瞄 */
   blind: number;
   /** 时间窗平均多宽、平均等了多久才离手，毫秒 */
@@ -72,12 +74,26 @@ function attempt(run: Run, from: Sim, wait: number, target: number): { s: Sim; o
   return { s, outcome: s.at === target ? 'ok' : 'strayed' };
 }
 
+/** 没有窗的时候查一下原因：等着或者飞着的时候资源先用尽了，就是资源撑不到；否则是够不着 */
+function starves(run: Run, from: Sim): boolean {
+  const base = clone(run, from), span = Math.ceil(run.feel.period / DT);
+  for (let k = 0; k < span; k += 6) {
+    const p = clone(run, base);
+    step(run, p, true);
+    while (p.at < 0 && !p.over) step(run, p, false);
+    if (p.over === 'out') return true;
+    for (let i = 0; i < 6; i++) step(run, base, false);
+    if (base.over) return base.over === 'out';
+  }
+  return false;
+}
+
 export function playRoute(run: Run, route: Route, given: Partial<BotOpts> = {}): RouteStat {
   const o = { ...BOT_DEFAULTS, ...given }, rng = makeRng(o.seed).fork(route.id);
   const sigma = o.sigmaMs / 1000 / DT, skip = Math.round(o.prepMs / 1000 / DT);
   const hops: HopStat[] = [], sumWin: number[] = [], sumWait: number[] = [], planned: number[] = [];
   for (let i = 1; i < route.spots.length; i++) {
-    hops.push({ from: route.spots[i - 1], to: route.spots[i], tries: 0, ok: 0, strayed: 0, missed: 0, out: 0, noWindow: 0, blind: 0, windowMs: 0, waitMs: 0, pass: 0 });
+    hops.push({ from: route.spots[i - 1], to: route.spots[i], tries: 0, ok: 0, strayed: 0, missed: 0, out: 0, noWindow: 0, starved: 0, blind: 0, windowMs: 0, waitMs: 0, pass: 0 });
     sumWin.push(0); sumWait.push(0); planned.push(0);
   }
   let clean = 0;
@@ -89,7 +105,7 @@ export function playRoute(run: Run, route: Route, given: Partial<BotOpts> = {}):
       if (run.rules.canSee && !run.rules.canSee(s, run.sheet.spots[h.to], run.env)) { h.blind++; spotless = false; break; }
       // 起点上人是不急的，落下之后才需要缓一下
       const win = findWindow(run, s, h.to, { skip: i === 0 ? 0 : skip });
-      if (!win) { h.noWindow++; spotless = false; break; }
+      if (!win) { h.noWindow++; if (starves(run, s)) h.starved++; spotless = false; break; }
       const mid = (win.from + win.to) / 2;
       planned[i]++; sumWin[i] += win.to - win.from + 1; sumWait[i] += mid;
       let done: Sim | null = null;

@@ -355,6 +355,6 @@ export const look: WorldLook = {
     if (record && score) return { text, accent: '新高' };
     return { text: text + (best ? '　最佳 ' + cn(best) : '') };
   },
-  fileName: (score) => `一笔-${rankOf(score)}-${score}`,
+  fileName: (score) => `飞白-${rankOf(score)}-${score}`,
   painter: (seed) => new InkPainter(seed),
 };

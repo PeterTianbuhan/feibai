@@ -75,11 +75,12 @@ export async function main(argv: string[]): Promise<number> {
       const worst = s.hops.reduce((a, b) => (b.pass < a.pass ? b : a));
       console.log(
         `  ${pad(s.route.id, 10)} ${pad(s.route.name, 18)} ${String(s.hops.length).padStart(3)}   ${pct(s.pass)}    ` +
-          `${worst.from}→${worst.to} ${pct(worst.pass)}（窗 ${worst.windowMs.toFixed(0)} 毫秒）${s.broken ? '  ← 走不通' : ''}`,
+          `${worst.from}→${worst.to} ${pct(worst.pass)}（窗 ${worst.windowMs.toFixed(0)} 毫秒）` +
+          (!s.broken ? '' : worst.blind ? '  ← 走不通：看不见下一个点' : worst.starved ? `  ← 走不通：${w.resource.name}撑不到` : worst.noWindow ? '  ← 走不通：够不着' : '  ← 走不通'),
       );
       if (argv.includes('--hops')) {
         for (const h of s.hops) {
-          const why = [h.strayed && `落到别处 ${h.strayed}`, h.missed && `飞空 ${h.missed}`, h.out && `${w.resource.name}尽 ${h.out}`, h.noWindow && `没有窗 ${h.noWindow}`, h.blind && `看不见 ${h.blind}`].filter(Boolean).join('，');
+          const why = [h.strayed && `落到别处 ${h.strayed}`, h.missed && `飞空 ${h.missed}`, h.out && `${w.resource.name}尽 ${h.out}`, h.noWindow && `没有窗 ${h.noWindow}${h.starved ? `（${h.starved} 次是${w.resource.name}撑不到）` : '（够不着）'}`, h.blind && `看不见 ${h.blind}`].filter(Boolean).join('，');
           console.log(`      ${String(h.from).padStart(3)}→${String(h.to).padEnd(3)} ${pct(h.pass)}  窗 ${h.windowMs.toFixed(0).padStart(3)} 毫秒  等 ${h.waitMs.toFixed(0).padStart(4)} 毫秒  ${why}`);
         }
       }

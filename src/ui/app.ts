@@ -70,7 +70,8 @@ export class App {
     const lv = o.params.get('level');
     this.level = clamp(lv !== null ? +lv | 0 : this.save.level, 0, LEVELS.length - 1);
     this.measure();
-    this.enter(ATLAS.worlds[want] && LOOKS[want] ? want : HOME, this.save.at?.spot);
+    const world = ATLAS.worlds[want] && LOOKS[want] ? want : HOME;
+    this.enter(world, this.save.at?.world === world ? this.save.at.spot : undefined);
     this.listen();
   }
 

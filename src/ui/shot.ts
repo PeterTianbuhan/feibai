@@ -6,8 +6,9 @@
 //   title  标题页，笔尖绕着起点画完一圈
 //   play   途中：走了几跳，正飞向下一个圈
 //   sight  到达一处景：第一次见到一处景，景已经洇出来
-//   end    结束那幅画：走了几跳之后飞空，题款和印都落好了
-//   map    地图：走完上面那一趟之后打开地图
+//   end    结束那幅画：走了几跳之后飞空，题款和印都落好了。
+//          飞空了不结束的世界（被送回大点，接着走）截的是刚被送回去的样子
+//   map    地图：走完上面那一趟之后打开地图（不结束的世界从「地图」那个小字收笔过去）
 
 import { findWindow, flyOut } from '../core/aim';
 import { TICKS } from '../core/feel';
@@ -19,9 +20,16 @@ export const SHOTS = ['title', 'play', 'sight', 'end', 'map'] as const;
 
 const FPS = 60;
 
-/** 替人走一条路：每次落下后等第一个时间窗，在窗的正中离手。走满 hops 跳之后故意飞空 */
-function follow(app: App, route: Route, hops: number) {
+/** 现在离手是不是哪儿都落不到：飞空，或者飞空之后被世界送回了大点 */
+function misses(app: App, sim: Sim): boolean {
+  const p = clone(app.run, sim);
+  return flyOut(app.run, p) < 0 || p.events.some((e) => e.type === 'put');
+}
+
+/** 替人走一条路：每次落下后等第一个时间窗，在窗的正中离手。走满 hops 跳之后故意飞空。返回的 missed：故意飞空的那一下按了没有 */
+function follow(app: App, route: Route, hops: number): { missed: boolean } {
   let next = 1, pressAt = -1;
+  const state = { missed: false };
   app.pilot = (sim: Sim) => {
     if (sim.at < 0 || sim.over) return false;
     if (pressAt < 0) {
@@ -33,7 +41,7 @@ function follow(app: App, route: Route, hops: number) {
         // 找一个离手之后哪儿都落不到的时刻
         const probe = clone(app.run, sim);
         for (let k = 0; k < TICKS * 6; k++) {
-          if (k > TICKS * 0.5 && flyOut(app.run, clone(app.run, probe)) < 0) { pressAt = sim.tick + k; break; }
+          if (k > TICKS * 0.5 && misses(app, probe)) { pressAt = sim.tick + k; break; }
           step(app.run, probe, false);
           if (probe.over) break;
         }
@@ -41,9 +49,11 @@ function follow(app: App, route: Route, hops: number) {
       }
     }
     if (sim.tick < pressAt) return false;
+    if (next > hops || next >= route.spots.length) state.missed = true;
     pressAt = -1; next++;
     return true;
   };
+  return state;
 }
 
 export async function runShot(app: App, shot: string, params: URLSearchParams) {
@@ -82,10 +92,17 @@ export async function runShot(app: App, shot: string, params: URLSearchParams) {
       if (!seen) throw new Error(`路「${route.name}」上没有景`);
       frames(2.6);
     } else if (shot === 'end' || shot === 'map') {
-      follow(app, route, hops + 1);
-      until(() => app.mode === 'end', '这一趟结束');
-      frames(3.4);
-      if (shot === 'map') { app.pilot = null; app.openMap(); frames(0.3); }
+      const pilot = follow(app, route, hops + 1);
+      until(() => app.mode === 'end' || (pilot.missed && app.sim.at >= 0), '这一趟结束');
+      if (app.mode === 'end') {
+        frames(3.4);
+        if (shot === 'map') { app.pilot = null; app.openMap(); frames(0.3); }
+      } else {
+        // 飞空了不结束的世界：笔已经被送回大点。没有结束那幅画，去地图走「地图」那个小字
+        app.pilot = null;
+        frames(1.2);
+        if (shot === 'map') { app.quit(); frames(0.3); }
+      }
     } else throw new Error(`没有 ${shot} 这个时刻。有：${SHOTS.join('、')}`);
     root.dataset.shot = 'ready';
   } catch (e) {

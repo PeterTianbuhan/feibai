@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>一笔</title>
+<style>
+  :root { --ink:#1c1917; --paper:#f2ecdf; --red:#b3261e; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { height:100%; overflow:hidden; background:var(--paper); color:var(--ink);
+    font-family:"STKaiti","KaiTi","Kaiti SC","楷体","Songti SC",serif;
+    -webkit-user-select:none; user-select:none; touch-action:none; cursor:default; }
+  canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  .layer { position:fixed; inset:0; pointer-events:none; transition:opacity .9s ease; }
+  .hidden { opacity:0; }
+
+  #title .col { position:absolute; right:9vw; top:11vh; writing-mode:vertical-rl; display:flex; gap:2.2vmin; align-items:flex-start; }
+  #title h1 { font-weight:400; font-size:clamp(64px,13vmin,150px); letter-spacing:.12em; line-height:1; }
+  #title p { font-size:clamp(14px,2.1vmin,20px); letter-spacing:.5em; opacity:.62; padding-top:.6em; }
+  #title .dot { width:clamp(14px,2.2vmin,22px); height:clamp(14px,2.2vmin,22px); background:var(--red); border-radius:3px; margin-top:.8em; opacity:.9; }
+  #hint { position:absolute; left:0; right:0; bottom:9vh; text-align:center; font-size:clamp(14px,2vmin,18px);
+    letter-spacing:.55em; opacity:.55; animation:breathe 2.6s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity:.18; } }
+  #levels { position:absolute; left:0; right:0; bottom:16vh; text-align:center; font-size:clamp(14px,2vmin,18px); }
+
+  button { pointer-events:auto; font:inherit; letter-spacing:.35em; color:var(--ink); background:none;
+    border:1px solid rgba(28,25,23,.35); padding:.15em .9em .15em 1.25em; margin:0 .5em; cursor:pointer; transition:all .25s; }
+  button:hover, button.on { background:var(--ink); color:var(--paper); }
+  .hidden button { pointer-events:none; }
+
+  #hud { transition:opacity .5s ease; }
+  #hud .score { position:absolute; left:5vw; top:6vh; writing-mode:vertical-rl; font-size:clamp(20px,3.4vmin,32px); letter-spacing:.2em; opacity:.75; }
+  #hud .bar { position:absolute; left:calc(5vw + .55em); bottom:6vh; width:2px; height:18vh; background:rgba(28,25,23,.1); font-size:clamp(20px,3.4vmin,32px); }
+  #hud .bar i { position:absolute; left:0; bottom:0; width:100%; height:100%; background:var(--ink); transform-origin:bottom; }
+
+  #end .box { position:absolute; left:6vw; bottom:7vh; font-size:clamp(13px,1.9vmin,17px); letter-spacing:.35em; line-height:2.3; opacity:.66; }
+  #end .box b { font-weight:400; color:var(--red); }
+  #end button { margin:0 1em 0 0; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="title" class="layer">
+  <div class="col">
+    <h1>一笔</h1>
+    <p>墨尽之前　落向下一处</p>
+    <div class="dot"></div>
+  </div>
+  <div id="levels"><button data-lv="0">慢</button><button data-lv="1">中</button><button data-lv="2">快</button></div>
+  <div id="hint">点按 · 空格　离手</div>
+</div>
+
+<div id="hud" class="layer hidden">
+  <div class="score" id="score"></div>
+  <div class="bar"><i id="inkbar"></i></div>
+</div>
+
+<div id="end" class="layer hidden">
+  <div class="box">
+    <div id="endline"></div>
+    <div><button id="again">再来</button><button id="save">存画</button></div>
+    <div style="opacity:.7">空格 另起一幅 · S 存画 · M 静音</div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+const FONT = '"STKaiti","KaiTi","Kaiti SC","楷体","Songti SC",serif';
+const RED = '#b3261e';
+const TAU = Math.PI * 2;
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const hash = n => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+
+// ---------- 难度 ----------
+// 每一档里这几个数全程不变：转一圈的秒数、飞行速度、水渍圈大小、一池墨能撑的秒数。
+// 手感是固定的，难度只来自下一个圈有多远、多小。
+const LEVELS = [
+  { name: '慢', period: 2.3, v: 215, rk: 1.18, life: 9.5 },
+  { name: '中', period: 1.8, v: 255, rk: 1, life: 7 },
+  { name: '快', period: 1.35, v: 300, rk: .86, life: 5 },
+];
+let lv = clamp(+(store.get('yibi.lv') ?? 1) | 0, 0, 2), LV = LEVELS[lv];
+const orbitR = n => clamp(n.R * .62, 38, 66);   // 绕圈半径只看墨点，不看落点准不准
+const FINE_GRACE = 1.6;                          // 落得"妙"，这几秒不耗墨
+
+// ---------- 数字与题款 ----------
+const D = '零一二三四五六七八九';
+function cn(n) {
+  if (n < 10) return D[n];
+  if (n < 20) return '十' + (n % 10 ? D[n % 10] : '');
+  if (n < 100) return D[n / 10 | 0] + '十' + (n % 10 ? D[n % 10] : '');
+  const h = n / 100 | 0, r = n % 100;
+  return D[h] + '百' + (r === 0 ? '' : r < 10 ? '零' + D[r] : D[r / 10 | 0] + '十' + (r % 10 ? D[r % 10] : ''));
+}
+function dateLine() {
+  const d = new Date(), y = d.getFullYear() - 4, m = d.getMonth() + 1;
+  const gz = '甲乙丙丁戊己庚辛壬癸'[((y % 10) + 10) % 10] + '子丑寅卯辰巳午未申酉戌亥'[((y % 12) + 12) % 12];
+  const s = m >= 2 && m <= 4 ? '春' : m <= 7 && m >= 5 ? '夏' : m >= 8 && m <= 10 ? '秋' : '冬';
+  return gz + '年' + s;
+}
+const RANKS = [[0, '试笔'], [3, '初墨'], [8, '行云'], [15, '流水'], [25, '游龙'], [40, '化境']];
+const rankOf = n => { let r = RANKS[0][1]; for (const [k, v] of RANKS) if (n >= k) r = v; return r; };
+
+// ---------- 画布与纸 ----------
+let W = 0, H = 0, dpr = 1, paper = null, baseZ = 1;
+function makePaper() {
+  paper = document.createElement('canvas');
+  paper.width = cv.width; paper.height = cv.height;
+  const p = paper.getContext('2d');
+  p.setTransform(dpr, 0, 0, dpr, 0, 0);
+  p.fillStyle = '#f2ecdf'; p.fillRect(0, 0, W, H);
+  // 纤维
+  const n = Math.round(W * H / 420);
+  for (let i = 0; i < n; i++) {
+    const x = Math.random() * W, y = Math.random() * H, a = Math.random() * TAU, l = rand(4, 22);
+    p.strokeStyle = Math.random() < .5 ? 'rgba(120,96,60,.045)' : 'rgba(255,252,244,.22)';
+    p.lineWidth = rand(.4, 1.1);
+    p.beginPath(); p.moveTo(x, y);
+    p.quadraticCurveTo(x + Math.cos(a) * l * .5 + rand(-3, 3), y + Math.sin(a) * l * .5 + rand(-3, 3), x + Math.cos(a) * l, y + Math.sin(a) * l);
+    p.stroke();
+  }
+  for (let i = 0; i < n / 3; i++) {
+    p.fillStyle = 'rgba(96,74,44,' + rand(.02, .07) + ')';
+    p.fillRect(Math.random() * W, Math.random() * H, rand(.5, 1.6), rand(.5, 1.6));
+  }
+  // 四角旧色
+  const g = p.createRadialGradient(W / 2, H / 2, Math.min(W, H) * .35, W / 2, H / 2, Math.hypot(W, H) * .62);
+  g.addColorStop(0, 'rgba(150,118,70,0)'); g.addColorStop(1, 'rgba(150,118,70,.2)');
+  p.fillStyle = g; p.fillRect(0, 0, W, H);
+}
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  baseZ = clamp(Math.min(W, H) / 700, .5, 1.45);
+  makePaper();
+}
+addEventListener('resize', resize);
+
+// ---------- 声音 ----------
+let AC = null, master = null, muted = false, noiseBuf = null, noteIdx = 5;
+const SCALE = [0, 2, 4, 7, 9]; // 宫商角徵羽
+function audio() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  try {
+    AC = new (window.AudioContext || window.webkitAudioContext)();
+    master = AC.createGain(); master.gain.value = .6; master.connect(AC.destination);
+    const dl = AC.createDelay(1), fb = AC.createGain(), lp = AC.createBiquadFilter();
+    dl.delayTime.value = .29; fb.gain.value = .32; lp.type = 'lowpass'; lp.frequency.value = 1400;
+    master.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(AC.destination);
+    noiseBuf = AC.createBuffer(1, AC.sampleRate * .4, AC.sampleRate);
+    const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  } catch (e) { AC = null; }
+}
+function pluck(freq, vol = .3, dur = 1.8) {
+  if (!AC || muted) return;
+  const t = AC.currentTime, g = AC.createGain(), f = AC.createBiquadFilter();
+  f.type = 'lowpass'; f.Q.value = 1.2;
+  f.frequency.setValueAtTime(Math.min(5200, freq * 9), t); f.frequency.exponentialRampToValueAtTime(Math.max(300, freq * 1.5), t + dur * .7);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + .006); g.gain.exponentialRampToValueAtTime(.0008, t + dur);
+  for (const [type, mul, gv] of [['triangle', 1, 1], ['sine', 2.003, .32], ['sawtooth', 1, .12]]) {
+    const o = AC.createOscillator(), og = AC.createGain();
+    o.type = type; og.gain.value = gv;
+    o.frequency.setValueAtTime(freq * mul * 1.014, t); o.frequency.exponentialRampToValueAtTime(freq * mul, t + .09);
+    o.connect(og); og.connect(f); o.start(t); o.stop(t + dur + .05);
+  }
+  f.connect(g); g.connect(master);
+}
+function noteFreq(i) { return 146.83 * Math.pow(2, (i / 5 | 0) + SCALE[i % 5] / 12); }
+function nextNote(fine) {
+  const steps = [-2, -1, -1, 1, 1, 2, 3];
+  noteIdx = clamp(noteIdx + steps[Math.random() * steps.length | 0], 1, 13);
+  pluck(noteFreq(noteIdx), .3);
+  if (fine) setTimeout(() => pluck(noteFreq(noteIdx + 5), .13, 2.4), 70);
+}
+function swish(vol = .05, freq = 1900, dur = .16) {
+  if (!AC || muted) return;
+  const t = AC.currentTime, s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+  s.buffer = noiseBuf; f.type = 'bandpass'; f.Q.value = .8;
+  f.frequency.setValueAtTime(freq * .6, t); f.frequency.exponentialRampToValueAtTime(freq * 1.6, t + dur);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + .03); g.gain.exponentialRampToValueAtTime(.0008, t + dur);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t + dur + .05);
+}
+function thud() {
+  if (!AC || muted) return;
+  const t = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
+  o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(48, t + .16);
+  g.gain.setValueAtTime(.5, t); g.gain.exponentialRampToValueAtTime(.001, t + .3);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + .32);
+  swish(.07, 700, .09);
+}
+
+// ---------- 状态 ----------
+let mode, time = 0, nodes, pts, splats, ripples, floats, P, ink, score, fineCount, dieT, endT, titleTurn;
+let cam = { x: 0, y: 0, z: 1 }, bounds = null, stamped = false, firstRun = true, heading;
+const bestKey = () => 'yibi.best.' + lv;
+let best = 0;
+
+function addNode() {
+  const i = nodes.length;
+  if (i === 0) { nodes.push({ x: 0, y: 0, R: 112, core: 7, born: -9, visited: true, wa: 0 }); return; }
+  const prev = nodes[i - 1];
+  // 越远圈越小、隔得越开。这是眼下唯一会变难的地方。
+  const R = Math.max(50, 100 - i * 1.15) * rand(.86, 1.1) * LV.rk, core = rand(4.5, 8.5);
+  let x, y, tries = 0, dist = rand(215, 290) + Math.min(i, 30) * 1.2;
+  for (;;) {
+    const h = heading + rand(-1, 1) * (tries < 12 ? .95 : 2.6);
+    x = prev.x + Math.cos(h) * dist; y = prev.y + Math.sin(h) * dist;
+    let ok = true;
+    for (const n of nodes) if (Math.hypot(n.x - x, n.y - y) < n.R + R + 42) { ok = false; break; }
+    if (ok) { heading = h; break; }
+    if (++tries > 30) { dist += 40; tries = 12; }
+  }
+  nodes.push({ x, y, R, core, born: time, visited: false, wa: 0 });
+}
+
+function reset() {
+  LV = LEVELS[lv]; best = +(store.get(bestKey()) || 0);
+  nodes = []; pts = []; splats = []; ripples = []; floats = [];
+  heading = rand(-.9, .2);
+  addNode(); for (let i = 0; i < 6; i++) addNode();
+  const n0 = nodes[0], n1 = nodes[1];
+  const a0 = Math.atan2(n1.y - n0.y, n1.x - n0.x) + Math.PI * .9, r0 = orbitR(n0);
+  P = { node: n0, left: null, r: r0, rT: r0, ang: a0, dir: 1, x: 0, y: 0, vx: 0, vy: 0, w: 0, pulse: 0, flown: 0, maxIdx: 0, grace: 0 };
+  P.x = n0.x + Math.cos(a0) * P.r; P.y = n0.y + Math.sin(a0) * P.r;
+  ink = 1; score = 0; fineCount = 0; dieT = 0; endT = 0; titleTurn = 0; stamped = false; bounds = null;
+  mode = 'title';
+  cam.x = (n0.x * 2 + n1.x) / 3; cam.y = (n0.y * 2 + n1.y) / 3; cam.z = baseZ;
+  $('end').classList.add('hidden');
+  $('title').classList.remove('hidden');
+  $('hud').classList.toggle('hidden', firstRun);
+  $('score').textContent = '';
+  for (const b of $('levels').children) b.classList.toggle('on', +b.dataset.lv === lv);
+}
+
+function setLevel(i) {
+  if (mode !== 'title') return;
+  lv = clamp(i, 0, 2); store.set('yibi.lv', lv); reset();
+}
+
+function release() {
+  const n = P.node; if (!n) return;
+  P.vx = -Math.sin(P.ang) * P.dir; P.vy = Math.cos(P.ang) * P.dir;
+  P.left = n; P.node = null; P.flown = 0;
+}
+
+function capture(n) {
+  const dx = P.x - n.x, dy = P.y - n.y, d = Math.hypot(dx, dy);
+  // 从落点起绕，再慢慢收到这个墨点固定的半径上；转速不随落点变。
+  P.node = n; P.r = Math.max(d, n.core + 6); P.rT = orbitR(n); P.ang = Math.atan2(dy, dx);
+  P.dir = dx * P.vy - dy * P.vx >= 0 ? 1 : -1;
+  P.pulse = 1;
+  const fresh = !n.visited;
+  const fine = fresh && d < n.core + (n.R - n.core) * .34;
+  if (fresh) {
+    n.visited = true; score++; ink = 1;
+    P.maxIdx = Math.max(P.maxIdx, nodes.indexOf(n));
+    while (nodes.length < P.maxIdx + 7) addNode();
+    $('score').textContent = cn(score);
+    if (fine) { fineCount++; P.grace = FINE_GRACE; floats.push({ x: n.x, y: n.y - n.core - 16, t: 0 }); }
+    nextNote(fine);
+  } else pluck(noteFreq(Math.max(0, noteIdx - 5)), .12, 1);
+  ripples.push({ x: n.x, y: n.y, r: P.r, t: 0 });
+  // 溅墨
+  const k = fine ? 9 : fresh ? 4 : 1;
+  for (let i = 0; i < k; i++) {
+    const a = Math.atan2(P.vy, P.vx) + rand(-.9, .9), l = rand(8, fine ? 58 : 34);
+    splats.push({ x: P.x + Math.cos(a) * l, y: P.y + Math.sin(a) * l, r: rand(.6, fine ? 3.4 : 2.3) * (1 - l / 90) });
+  }
+}
+
+function startDying() {
+  if (mode !== 'play') return;
+  mode = 'dying'; dieT = 0;
+  if (P.node) release();
+  pluck(73.42, .32, 2.6);
+}
+
+function endGame() {
+  mode = 'end'; endT = 0;
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const p of pts) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
+  bounds = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: Math.max(80, x1 - x0), h: Math.max(80, y1 - y0) };
+  const rec = score > best;
+  if (rec) { best = score; store.set(bestKey(), best); }
+  $('endline').innerHTML = '「' + rankOf(score) + '」　' + (score ? cn(score) + '笔' : '未成') + '　' + LV.name +
+    (fineCount ? '　妙 ' + cn(fineCount) : '') + (rec && score ? '　<b>新高</b>' : best ? '　最佳 ' + cn(best) : '');
+  $('hud').classList.add('hidden');
+  setTimeout(() => { if (mode === 'end') $('end').classList.remove('hidden'); }, 1500);
+}
+
+function act() {
+  audio();
+  if (mode === 'title') {
+    mode = 'play'; firstRun = false;
+    $('title').classList.add('hidden'); $('hud').classList.remove('hidden');
+    release(); swish();
+  } else if (mode === 'play') {
+    if (P.node) { release(); swish(); }
+  } else if (mode === 'end' && endT > 1.1) reset();
+}
+
+// ---------- 更新 ----------
+function update(dt) {
+  time += dt;
+  if (mode !== 'end') {
+    const v = LV.v;
+    if (P.node) {
+      const da = TAU / LV.period * dt;           // 固定转速：每圈用时一样
+      P.ang += P.dir * da;
+      P.r += (P.rT - P.r) * (1 - Math.exp(-dt * 5));
+      P.x = P.node.x + Math.cos(P.ang) * P.r; P.y = P.node.y + Math.sin(P.ang) * P.r;
+      if (mode === 'title') titleTurn += da;
+    } else {
+      P.x += P.vx * v * dt; P.y += P.vy * v * dt; P.flown += v * dt;
+      if (mode === 'play') {
+        for (const n of nodes) {
+          if (n === P.left) continue;
+          const dx = P.x - n.x, dy = P.y - n.y;
+          if (dx * dx + dy * dy < n.R * n.R && dx * P.vx + dy * P.vy >= 0) { capture(n); break; }
+        }
+        if (!P.node && P.flown > 540) startDying();
+      }
+    }
+    if (mode === 'play') {
+      if (P.grace > 0) P.grace -= dt; else ink -= dt / LV.life;
+      if (ink <= 0) { ink = 0; startDying(); }
+    }
+    let fade = 1;
+    if (mode === 'dying') { dieT += dt; ink = Math.max(0, ink - dt * 1.5); fade = Math.max(0, 1 - dieT / .55); }
+    P.pulse = Math.max(0, P.pulse - dt * 4.2);
+    const wT = 9.5 * (.36 + .64 * Math.sqrt(ink)) * (P.node ? 1 : .68) * (1 + .75 * P.pulse) * (1 + .1 * Math.sin(time * 8.3) + .06 * Math.sin(time * 21.7));
+    P.w += (wT - P.w) * (1 - Math.exp(-dt * 13));
+    const w = P.w * fade;
+    const last = pts[pts.length - 1];
+    if (!(mode === 'title' && titleTurn > TAU * 1.04)) {
+      if (!last || Math.hypot(P.x - last.x, P.y - last.y) > 2.6) pts.push({ x: P.x, y: P.y, w, ink });
+    }
+    if (mode === 'dying' && dieT >= .55) endGame();
+    $('inkbar').style.transform = 'scaleY(' + ink.toFixed(3) + ')';
+  } else endT += dt;
+
+  // 镜头
+  let tx, ty, tz;
+  if (mode === 'end') {
+    tx = bounds.x; ty = bounds.y;
+    tz = Math.min(W * .74 / bounds.w, H * .7 / bounds.h, baseZ * 1.25);
+  } else {
+    const nx = nodes[Math.min(P.maxIdx + 1, nodes.length - 1)];
+    tx = P.x * .62 + nx.x * .38; ty = P.y * .62 + nx.y * .38; tz = baseZ;
+  }
+  const k = 1 - Math.exp(-dt * (mode === 'end' ? 2.2 : 3.2));
+  cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; cam.z += (tz - cam.z) * k;
+
+  for (const n of nodes) {
+    const t = mode === 'end' ? 0 : !n.visited ? 1 : n === P.node ? .55 : 0;
+    n.wa += (t - n.wa) * (1 - Math.exp(-dt * 4));
+  }
+  for (const r of ripples) r.t += dt;
+  ripples = ripples.filter(r => r.t < .7);
+  for (const f of floats) f.t += dt;
+  floats = floats.filter(f => f.t < 1.3);
+}
+
+// ---------- 绘制 ----------
+const SHADES = [];
+for (let i = 0; i <= 16; i++) {
+  const s = clamp(i / 16 * 1.5, 0, 1), m = (a, b) => Math.round(a + (b - a) * s);
+  SHADES.push('rgb(' + m(126, 28) + ',' + m(118, 25) + ',' + m(108, 23) + ')');
+}
+
+function drawTrail() {
+  const z = cam.z, ox = W / 2 - cam.x * z, oy = H / 2 - cam.y * z;
+  const m = 30;
+  ctx.lineCap = 'round';
+  ctx.globalCompositeOperation = 'darken';
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const bx = b.x * z + ox, by = b.y * z + oy;
+    if (bx < -m || bx > W + m || by < -m || by > H + m) continue;
+    const ax = a.x * z + ox, ay = a.y * z + oy;
+    const w = Math.max(.5, b.w * z);
+    ctx.strokeStyle = SHADES[Math.round(b.ink * 16)];
+    if (b.ink > .42) {
+      ctx.lineWidth = w;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    } else {
+      // 飞白：墨少时笔毫分叉
+      let nx = -(by - ay), ny = bx - ax; const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
+      const nb = 6, th = .2 + b.ink * 1.75;
+      ctx.lineWidth = Math.max(.5, w / nb * .85);
+      for (let q = 0; q < nb; q++) {
+        if (hash(((i + q * 5) >> 3) * 7.3 + q * 131.7) > th) continue;
+        const off = ((q + .5) / nb - .5) * w;
+        ctx.beginPath(); ctx.moveTo(ax + nx * off, ay + ny * off); ctx.lineTo(bx + nx * off, by + ny * off); ctx.stroke();
+      }
+    }
+  }
+  ctx.fillStyle = SHADES[16];
+  for (const s of splats) {
+    const x = s.x * z + ox, y = s.y * z + oy;
+    if (x < -m || x > W + m || y < -m || y > H + m) continue;
+    ctx.beginPath(); ctx.arc(x, y, Math.max(.4, s.r * z), 0, TAU); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawNodes() {
+  const z = cam.z, ox = W / 2 - cam.x * z, oy = H / 2 - cam.y * z;
+  for (const n of nodes) {
+    const x = n.x * z + ox, y = n.y * z + oy, R = n.R * z;
+    if (x < -R || x > W + R || y < -R || y > H + R) continue;
+    const born = clamp((time - n.born) / .7, 0, 1);
+    const a = n.wa * born;
+    if (a > .01) {
+      // 水渍
+      const g = ctx.createRadialGradient(x, y, 0, x, y, R);
+      g.addColorStop(0, 'rgba(40,36,32,' + .012 * a + ')');
+      g.addColorStop(.78, 'rgba(40,36,32,' + .045 * a + ')');
+      g.addColorStop(.955, 'rgba(40,36,32,' + .105 * a + ')');
+      g.addColorStop(1, 'rgba(40,36,32,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = born;
+    ctx.fillStyle = '#1c1917';
+    ctx.beginPath(); ctx.ellipse(x, y, n.core * z, n.core * z * .93, n.core, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  for (const r of ripples) {
+    const k = r.t / .7;
+    ctx.strokeStyle = 'rgba(28,25,23,' + (.22 * (1 - k)) + ')';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(r.x * z + ox, r.y * z + oy, (r.r + k * 46) * z, 0, TAU); ctx.stroke();
+  }
+}
+
+function drawTip() {
+  if (mode === 'end') return;
+  const z = cam.z, x = (P.x - cam.x) * z + W / 2, y = (P.y - cam.y) * z + H / 2;
+  // 去向
+  if (P.node && mode !== 'dying') {
+    const tx = -Math.sin(P.ang) * P.dir, ty = Math.cos(P.ang) * P.dir;
+    for (let i = 1; i <= 9; i++) {
+      ctx.fillStyle = 'rgba(28,25,23,' + (.34 * (1 - i / 10)) + ')';
+      ctx.beginPath(); ctx.arc(x + tx * i * 12 * z, y + ty * i * 12 * z, 1.25, 0, TAU); ctx.fill();
+    }
+  }
+  const fade = mode === 'dying' ? Math.max(0, 1 - dieT / .55) : 1;
+  const r = Math.max(1, P.w * .62 * z) * fade;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3.2);
+  g.addColorStop(0, 'rgba(28,25,23,' + .2 * ink * fade + ')'); g.addColorStop(1, 'rgba(28,25,23,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#1c1917'; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+}
+
+function drawFloats() {
+  const z = cam.z;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const f of floats) {
+    const k = f.t / 1.3;
+    ctx.globalAlpha = k < .15 ? k / .15 : 1 - (k - .15) / .85;
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(22 * z) + 'px ' + FONT;
+    ctx.fillText('妙', (f.x - cam.x) * z + W / 2, (f.y - cam.y - k * 26) * z + H / 2);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawColophon() {
+  // 题款与印
+  const fs = clamp(Math.min(W, H) * .027, 13, 22), s = fs * 2.7, m = Math.max(24, Math.min(W, H) * .07);
+  const sx = W - m - s, sy = H - m - s;
+  const text = dateLine() + ' 第' + cn(score) + '笔';
+  const chars = [...text];
+  let hgt = 0; for (const c of chars) hgt += c === ' ' ? fs * .6 : fs * 1.22;
+  let y = sy - fs * .9 - hgt + fs * .6;
+  ctx.font = fs + 'px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#1c1917';
+  let i = 0;
+  for (const c of chars) {
+    if (c === ' ') { y += fs * .6; continue; }
+    const a = clamp((endT - .7 - i * .07) / .25, 0, 1);
+    ctx.globalAlpha = a * .86;
+    ctx.fillText(c, sx + s / 2, y);
+    y += fs * 1.22; i++;
+  }
+  ctx.globalAlpha = 1;
+  const t0 = .7 + i * .07 + .25;
+  if (endT < t0) return;
+  if (!stamped) { stamped = true; thud(); }
+  const k = clamp((endT - t0) / .16, 0, 1), sc = 1 + (1 - k) * (1 - k) * .55;
+  ctx.save();
+  ctx.translate(sx + s / 2, sy + s / 2); ctx.rotate(-.035); ctx.scale(sc, sc);
+  ctx.globalAlpha = k * .93;
+  ctx.fillStyle = RED;
+  const r = s * .1, h = s / 2;
+  ctx.beginPath();
+  ctx.moveTo(-h + r, -h); ctx.lineTo(h - r, -h); ctx.quadraticCurveTo(h, -h, h, -h + r);
+  ctx.lineTo(h, h - r); ctx.quadraticCurveTo(h, h, h - r, h);
+  ctx.lineTo(-h + r, h); ctx.quadraticCurveTo(-h, h, -h, h - r);
+  ctx.lineTo(-h, -h + r); ctx.quadraticCurveTo(-h, -h, -h + r, -h); ctx.fill();
+  ctx.fillStyle = '#f2ecdf';
+  ctx.font = 'bold ' + (s * .43) + 'px ' + FONT;
+  const rk = rankOf(score);
+  ctx.fillText(rk[0], 0, -s * .215); ctx.fillText(rk[1], 0, s * .225);
+  // 印泥残缺
+  for (let j = 0; j < 46; j++) {
+    const px = (hash(j * 3.1 + score) - .5) * s, py = (hash(j * 7.7 + 2 + score) - .5) * s;
+    ctx.globalAlpha = k * .75;
+    ctx.fillRect(px, py, hash(j * 1.3) * s * .045 + .4, hash(j * 2.9) * s * .03 + .4);
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+}
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(paper, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawNodes();
+  drawTrail();
+  drawTip();
+  drawFloats();
+  if (mode === 'end') drawColophon();
+}
+
+// ---------- 循环与输入 ----------
+let lastT = 0;
+function frame(t) {
+  const dt = Math.min(.033, (t - lastT) / 1000 || 0); lastT = t;
+  update(dt); draw();
+  requestAnimationFrame(frame);
+}
+function save() {
+  cv.toBlob(b => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b); a.download = '一笔-' + rankOf(score) + '-' + score + '.png';
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+}
+addEventListener('pointerdown', e => { if (e.target.tagName === 'BUTTON') return; e.preventDefault(); act(); });
+addEventListener('keydown', e => {
+  if (e.repeat) return;
+  if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); act(); }
+  else if (e.code === 'KeyM') muted = !muted;
+  else if (e.code === 'KeyS' && mode === 'end') save();
+  else if (/^Digit[123]$/.test(e.code)) setLevel(+e.code.slice(5) - 1);
+});
+$('levels').addEventListener('click', e => { if (e.target.dataset.lv !== undefined) setLevel(+e.target.dataset.lv); });
+$('again').addEventListener('click', () => { audio(); if (mode === 'end') reset(); });
+$('save').addEventListener('click', save);
+addEventListener('contextmenu', e => e.preventDefault());
+
+resize(); reset();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

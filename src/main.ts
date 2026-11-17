@@ -1,7 +1,17 @@
-// 入口。游戏还没搬进来，能玩的原型在 prototype/index.html。
-const canvas = document.getElementById('c') as HTMLCanvasElement;
-canvas.width = innerWidth;
-canvas.height = innerHeight;
-const ctx = canvas.getContext('2d')!;
-ctx.fillStyle = '#f2ecdf';
-ctx.fillRect(0, 0, canvas.width, canvas.height);
+// 入口。平时跟着屏幕刷新跑；带 ?shot=<时刻> 的时候不跑循环，由截图模式一帧一帧推到那个时刻。
+
+import { App } from './ui/app';
+import { browserStore, memoryStore } from './ui/store';
+
+const params = new URLSearchParams(location.search);
+const shot = params.get('shot');
+const app = new App({
+  canvas: document.getElementById('c') as HTMLCanvasElement,
+  store: shot ? memoryStore() : browserStore,
+  params,
+  still: !!shot,
+  now: shot ? () => new Date(2026, 10, 17) : undefined,
+});
+
+if (shot) void import('./ui/shot').then((m) => m.runShot(app, shot, params));
+else app.loop();
